@@ -215,7 +215,7 @@ ButtonManager.prototype.loadIcons_ = function() {
 
 module.exports = ButtonManager;
 
-},{"./aligner.js":1,"./emitter.js":9,"./modes.js":11,"./util.js":13}],3:[function(_dereq_,module,exports){
+},{"./aligner.js":1,"./emitter.js":8,"./modes.js":10,"./util.js":12}],3:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -230,36 +230,88 @@ module.exports = ButtonManager;
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-var BarrelDistortion = _dereq_('./distortion/barrel-distortion-fragment-v2.js');
 var Util = _dereq_('./util.js');
 
 
-function ShaderPass(shader) {
-  this.uniforms = THREE.UniformsUtils.clone(shader.uniforms);
+/**
+ * A mesh-based distorter. Based on
+ * https://github.com/mrdoob/three.js/blob/dev/examples/js/effects/CardboardEffect.js.
+ *
+ * Works as follows:
+ * 1. Create a tesselated quad.
+ * 2. Distort the quad.
+ * 3. Use the distorted quad to render
+ */
+function CardboardDistorter(renderer) {
+  this.renderer = renderer;
+  this.genuineRender = renderer.render;
+  this.genuineSetSize = renderer.setSize;
 
-  this.material = new THREE.ShaderMaterial({
-    defines: shader.defines || {},
-    uniforms: this.uniforms,
-    vertexShader: shader.vertexShader,
-    fragmentShader: shader.fragmentShader
-  });
-
+  // Camera, scene and geometry to render the scene to a texture.
   this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  this.scene  = new THREE.Scene();
-  this.quad = new THREE.Mesh(new THREE.PlaneBufferGeometry(2, 2), null);
-  this.scene.add(this.quad);
+
+  this.renderTarget = this.createRenderTarget_();
+
+  this.scene = new THREE.Scene();
+}
+
+
+CardboardDistorter.prototype.patch = function() {
+  if (!this.isActive) {
+    return;
+  }
+
+  this.renderer.render = function(scene, camera, renderTarget, forceClear) {
+    this.genuineRender.call(this.renderer, scene, camera, this.renderTarget, forceClear);
+  }.bind(this);
+
+  this.renderer.setSize = function(width, height) {
+    this.renderTarget = this.createRenderTarget_();
+    this.updateGeometry_(this.geometry);
+    this.genuineSetSize.call(this.renderer, width, height);
+  }.bind(this);
 };
 
-ShaderPass.prototype.render = function(renderFunc, buffer) {
-  this.uniforms.texture.value = buffer;
-  this.quad.material = this.material;
-  renderFunc(this.scene, this.camera);
+
+CardboardDistorter.prototype.unpatch = function() {
+  if (!this.isActive) {
+    return;
+  }
+  this.renderer.render = this.genuineRender;
+  this.renderer.setSize = this.genuineSetSize;
 };
 
-function createRenderTarget(renderer) {
-  var width  = renderer.context.canvas.width;
-  var height = renderer.context.canvas.height;
+
+CardboardDistorter.prototype.preRender = function() {
+  if (!this.isActive) {
+    return;
+  }
+  this.renderer.setRenderTarget(this.renderTarget);
+};
+
+
+CardboardDistorter.prototype.postRender = function() {
+  if (!this.isActive) {
+    return;
+  }
+  var size = this.renderer.getSize();
+  this.renderer.setViewport(0, 0, size.width, size.height);
+  this.genuineRender.call(this.renderer, this.scene, this.camera);
+};
+
+
+/**
+ * Toggles distortion. This is called externally by the boilerplate.
+ * It should be enabled only if WebVR is provided by polyfill.
+ */
+CardboardDistorter.prototype.setActive = function(state) {
+  this.isActive = state;
+};
+
+
+CardboardDistorter.prototype.createRenderTarget_ = function(renderer) {
+  var width  = this.renderer.context.canvas.width;
+  var height = this.renderer.context.canvas.height;
   var parameters = {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
@@ -270,70 +322,17 @@ function createRenderTarget(renderer) {
   return new THREE.WebGLRenderTarget(width, height, parameters);
 }
 
-function CardboardDistorter(renderer) {
-  this.shaderPass = new ShaderPass(BarrelDistortion);
-  this.renderer = renderer;
-
-  this.textureTarget = null;
-  this.genuineRender = renderer.render;
-  this.genuineSetSize = renderer.setSize;
-  this.isActive = false;
-}
-
-CardboardDistorter.prototype.patch = function() {
-  if (!this.isActive) {
-    return;
-  }
-  this.textureTarget = createRenderTarget(this.renderer);
-
-  this.renderer.render = function(scene, camera, renderTarget, forceClear) {
-    this.genuineRender.call(this.renderer, scene, camera, this.textureTarget, forceClear);
-  }.bind(this);
-
-  this.renderer.setSize = function(width, height) {
-    this.genuineSetSize.call(this.renderer, width, height);
-    this.textureTarget = createRenderTarget(this.renderer);
-  }.bind(this);
-};
-
-CardboardDistorter.prototype.unpatch = function() {
-  if (!this.isActive) {
-    return;
-  }
-  this.renderer.render = this.genuineRender;
-  this.renderer.setSize = this.genuineSetSize;
-};
-
-CardboardDistorter.prototype.preRender = function() {
-  if (!this.isActive) {
-    return;
-  }
-  this.renderer.setRenderTarget(this.textureTarget);
-};
-
-CardboardDistorter.prototype.postRender = function() {
-  if (!this.isActive) {
-    return;
-  }
-  var size = this.renderer.getSize();
-  this.renderer.setViewport(0, 0, size.width, size.height);
-  this.shaderPass.render(this.genuineRender.bind(this.renderer), this.textureTarget);
-};
-
 /**
- * Toggles distortion. This is called externally by the boilerplate.
- * It should be enabled only if WebVR is provided by polyfill.
- */
-CardboardDistorter.prototype.setActive = function(state) {
-  this.isActive = state;
-};
-
-/**
- * Updates uniforms.
+ * Called by the manager whenever the device info changes. At this point we need
+ * to re-calculate the distortion mesh and update the geometry.
  */
 CardboardDistorter.prototype.updateDeviceInfo = function(deviceInfo) {
-  var uniforms = this.shaderPass.material.uniforms;
+  this.geometry = this.createWarpMeshGeometry_(deviceInfo);
+  this.updateGeometry_(this.geometry);
+};
 
+
+CardboardDistorter.prototype.createWarpMeshGeometry_ = function(deviceInfo) {
   var distortedProj = deviceInfo.getProjectionMatrixLeftEye();
   var undistortedProj = deviceInfo.getProjectionMatrixLeftEye(true);
   var viewport = deviceInfo.getUndistortedViewportLeftEye();
@@ -346,43 +345,135 @@ CardboardDistorter.prototype.updateDeviceInfo = function(deviceInfo) {
     yTrans: 2 * (viewport.y + viewport.height / 2) / device.height - 1
   }
 
-  uniforms.projectionLeft.value.copy(
-      Util.projectionMatrixToVector_(distortedProj));
-  uniforms.unprojectionLeft.value.copy(
-      Util.projectionMatrixToVector_(undistortedProj, params));
+  this.projectionLeft = Util.projectionMatrixToVector_(distortedProj);
+  this.unprojectionLeft = Util.projectionMatrixToVector_(undistortedProj, params);
 
-  // Set distortion coefficients.
-  var coefficients = deviceInfo.viewer.distortionCoefficients;
-  uniforms.distortion.value.set(coefficients[0], coefficients[1]);
-      
+  /*
+  this.projectionLeft = new THREE.Vector4(1.0, 1.0, -0.5, -0.5);
+  this.unprojectionLeft = new THREE.Vector4(1.0, 1.0, -0.5, -0.5);
+  */
+  this.projectionRight = Util.leftProjectionVectorToRight_(this.projectionLeft);
+  this.unprojectionRight = Util.leftProjectionVectorToRight_(this.unprojectionLeft);
 
-  // For viewer profile debugging, show the lens center.
-  if (WebVRConfig.SHOW_EYE_CENTERS) {
-    uniforms.showCenter.value = 1;
+  this.distortion = new THREE.Vector2();
+  this.distortion.fromArray(deviceInfo.viewer.distortionCoefficients);
+
+  // Calculate the distortion mesh (this is a port of https://goo.gl/LgpmzU).
+  //var geometry = new THREE.PlaneBufferGeometry(1, 2, 10, 20);
+  var geometry = new THREE.PlaneBufferGeometry(1, 2, 40, 40);
+  geometry = Util.toNonIndexed(geometry);
+  var eyePositions = geometry.attributes.position.array;
+  var eyeUvs = geometry.attributes.uv.array;
+
+  // Distortion mesh consists of two eye meshes, each one independent of the
+  // other. So we take the original (half) geometry created above, duplicate it
+  // and translate it.
+	var positions = new Float32Array(eyePositions.length * 2);
+	positions.set(eyePositions);
+	positions.set(eyePositions, eyePositions.length);
+
+	uvs = new Float32Array(eyeUvs.length * 2);
+	uvs.set(eyeUvs);
+	uvs.set(eyeUvs, eyeUvs.length);
+
+  // Go through the triangle strip and distort each vertex.
+  var vector = new THREE.Vector2();
+  var length = uvs.length/2;
+  for (var i = 0; i < length; i++) {
+    vector.x = uvs[i * 2 + 0];
+    vector.y = uvs[i * 2 + 1];
+
+    // Now we split screen coordinates into left and right eye coordinates, each
+    // into [0, 1]^2.
+    var isLeft = i < length/2;
+    var uvOffset = (isLeft ? 0 : 0.5);
+
+    // Next, apply barrel distortion.
+    vector = this.distort_(vector, isLeft);
+
+    // Convert from eye into screen coordinates.
+    vector.x = vector.x / 2 + uvOffset;
+
+    uvs[i * 2 + 0] = vector.x;
+    uvs[i * 2 + 1] = vector.y;
+
+    var positionOffset = (isLeft ? -0.5 : 0.5);
+    positions[i * 3] = positions[i * 3] + positionOffset;
   }
 
-  // Allow custom background colors if this global is set.
-  if (WebVRConfig.DISTORTION_BGCOLOR) {
-    uniforms.backgroundColor.value =
-        WebVRConfig.DISTORTION_BGCOLOR;
-  }
+  // Use both eyes in the final geometry.
+	geometry.attributes.position.array = positions;
+	geometry.attributes.uv.array = uvs;
+  return geometry;
+};
 
-  this.shaderPass.material.needsUpdate = true;
+
+CardboardDistorter.prototype.updateGeometry_ = function(geometry) {
+	//var material = new THREE.MeshBasicMaterial({wireframe: true});
+  //var material = new THREE.MeshBasicMaterial({map: THREE.ImageUtils.loadTexture('img/UV_Grid_Sm.jpg')});
+  var material = new THREE.MeshBasicMaterial({map: this.renderTarget});
+  // Remove all objects from the scene.
+  var scene = this.scene;
+  scene.traverse(function(child) {
+    scene.remove(child);
+  });
+
+  // Add this mesh to the scene.
+	var mesh = new THREE.Mesh(geometry, material);
+  this.scene.add(mesh);
 };
 
 
 /**
- * Sets distortion coefficients as a Vector2.
+ * Given a vector in [0, 1], distort it
+ *
+ * @param {Vector2} vec
+ * @param {Boolean} isLeft True iff it's the left eye. False otherwise.
  */
-CardboardDistorter.prototype.setDistortionCoefficients = function(coefficients) {
-  var value = new THREE.Vector2(coefficients[0], coefficients[1]);
-  this.shaderPass.material.uniforms.distortion.value = value;
-  this.shaderPass.material.needsUpdate = true;
+CardboardDistorter.prototype.distort_ = function(vector, isLeft) {
+  var proj = isLeft ? this.projectionLeft : this.projectionRight;
+  var unproj = isLeft ? this.unprojectionLeft : this.unprojectionRight;
+  return this.barrel_(vector, proj, unproj, this.distortion);
 };
+
+
+/**
+ * @param {THREE.Vector2} vec
+ * @param {THREE.Vector4} projection
+ * @param {THREE.Vector4} unprojection
+ *
+ * @return {THREE.Vector2} Barrel distorted version of vec.
+ */
+CardboardDistorter.prototype.barrel_ = function(vec, projection, unprojection, distortion) {
+  // 'vec2 w = (v + unprojection.zw) / unprojection.xy;',
+  var w = new THREE.Vector2();
+  w.x = (vec.x + unprojection.z) / unprojection.x;
+  w.y = (vec.y + unprojection.w) / unprojection.y;
+
+  // 'return projection.xy * (poly(dot(w, w)) * w) - projection.zw;',
+  var out = new THREE.Vector2();
+  w.multiplyScalar(this.poly_(w.dot(w), distortion));
+  out.x = projection.x * w.x - projection.z;
+  out.y = projection.y * w.y - projection.w;
+
+  return out;
+};
+
+
+/**
+ * @return {Number} Polynomial output of the distorter.
+ */
+CardboardDistorter.prototype.poly_ = function(val, distortion) {
+  if (this.showCenter && val < 0.001) {
+    return 10000;
+  }
+  return 1.0 + (distortion.x + distortion.y * val) * val;
+};
+
 
 module.exports = CardboardDistorter;
 
-},{"./distortion/barrel-distortion-fragment-v2.js":5,"./util.js":13}],4:[function(_dereq_,module,exports){
+},{"./util.js":12}],4:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -671,81 +762,7 @@ function CardboardViewer(params) {
 DeviceInfo.Viewers = Viewers;
 module.exports = DeviceInfo;
 
-},{"./distortion/distortion.js":6,"./util.js":13}],5:[function(_dereq_,module,exports){
-var BarrelDistortionFragment = {
-  type: 'fragment_v2',
-
-  
-  uniforms: {
-    texture:   { type: 't', value: null },
-    distortion: { type: 'v2', value: new THREE.Vector2(0.441, 0.156) },
-    projectionLeft:    { type: 'v4', value: new THREE.Vector4(1.0, 1.0, -0.5, -0.5) },
-    unprojectionLeft:  { type: 'v4', value: new THREE.Vector4(1.0, 1.0, -0.5, -0.5) },
-    backgroundColor: { type: 'v4', value: new THREE.Vector4(0.0, 0.0, 0.0, 1.0) },
-    showCenter: { type: 'i', value: 0},
-    dividerColor: { type: 'v4', value: new THREE.Vector4(0.5, 0.5, 0.5, 1.0) },
-  },
-
-  vertexShader: [
-  'varying vec2 vUV;',
-
-  'void main() {',
-    'vUV = uv;',
-    'gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );',
-  '}'
-
-  ].join('\n'),
-
-  // TODO: use min/max/saturate instead of conditionals
-  fragmentShader: [
-    'uniform sampler2D texture;',
-
-    'uniform vec2 distortion;',
-    'uniform vec4 backgroundColor;',
-    'uniform vec4 projectionLeft;',
-    'uniform vec4 unprojectionLeft;',
-    'uniform int showCenter;',
-    'uniform vec4 dividerColor;',
-
-    'varying vec2 vUV;',
-
-    'float poly(float val) {',
-      'return (showCenter == 1 && val < 0.00010) ? ',
-      '10000.0 : 1.0 + (distortion.x + distortion.y * val) * val;',
-    '}',
-
-    'vec2 barrel(vec2 v, vec4 projection, vec4 unprojection) {',
-      'vec2 w = (v + unprojection.zw) / unprojection.xy;',
-      'return projection.xy * (poly(dot(w, w)) * w) - projection.zw;',
-    '}',
-
-    'void main() {',
-      // right projections are shifted and vertically mirrored relative to left
-      'vec4 projectionRight = ',
-      '(projectionLeft + vec4(0.0, 0.0, 1.0, 0.0)) * vec4(1.0, 1.0, -1.0, 1.0);',
-      'vec4 unprojectionRight = ',
-      '(unprojectionLeft + vec4(0.0, 0.0, 1.0, 0.0)) * vec4(1.0, 1.0, -1.0, 1.0);',
-
-      'vec2 a = (vUV.x < 0.5) ? ',
-      'barrel(vec2(vUV.x / 0.5, vUV.y), projectionLeft, unprojectionLeft) : ',
-      'barrel(vec2((vUV.x - 0.5) / 0.5, vUV.y), projectionRight, unprojectionRight);',
-
-      'if (dividerColor.w > 0.0 && abs(vUV.x - 0.5) < .001) {',
-        // Don't render the divider, since it's rendered in HTML.
-        //'gl_FragColor = dividerColor;',
-      '} else if (a.x < 0.0 || a.x > 1.0 || a.y < 0.0 || a.y > 1.0) {',
-        'gl_FragColor = backgroundColor;',
-      '} else {',
-        'gl_FragColor = texture2D(texture, vec2(a.x * 0.5 + (vUV.x < 0.5 ? 0.0 : 0.5), a.y));',
-      '}',
-    '}'
-
-    ].join('\n')
-};
-
-module.exports = BarrelDistortionFragment;
-
-},{}],6:[function(_dereq_,module,exports){
+},{"./distortion/distortion.js":5,"./util.js":12}],5:[function(_dereq_,module,exports){
 /**
  * TODO(smus): Implement coefficient inversion.
  */
@@ -811,7 +828,7 @@ Distortion.prototype.distortionFactor_ = function(radius) {
 
 module.exports = Distortion;
 
-},{}],7:[function(_dereq_,module,exports){
+},{}],6:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -1783,7 +1800,7 @@ var DPDB_CACHE = {
 module.exports = DPDB_CACHE;
 
 
-},{}],8:[function(_dereq_,module,exports){
+},{}],7:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -1974,7 +1991,7 @@ function DeviceParams(params) {
 
 module.exports = Dpdb;
 
-},{"./dpdb-cache.js":7,"./util.js":13}],9:[function(_dereq_,module,exports){
+},{"./dpdb-cache.js":6,"./util.js":12}],8:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -2018,7 +2035,7 @@ Emitter.prototype.on = function(eventName, callback) {
 
 module.exports = Emitter;
 
-},{}],10:[function(_dereq_,module,exports){
+},{}],9:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -2039,7 +2056,7 @@ var WebVRManager = _dereq_('./webvr-manager.js');
 window.WebVRConfig = window.WebVRConfig || {};
 window.WebVRManager = WebVRManager;
 
-},{"./webvr-manager.js":16}],11:[function(_dereq_,module,exports){
+},{"./webvr-manager.js":15}],10:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -2067,7 +2084,7 @@ var Modes = {
 
 module.exports = Modes;
 
-},{}],12:[function(_dereq_,module,exports){
+},{}],11:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -2191,7 +2208,7 @@ RotateInstructions.prototype.loadIcon_ = function() {
 
 module.exports = RotateInstructions;
 
-},{"./util.js":13}],13:[function(_dereq_,module,exports){
+},{"./util.js":12}],12:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -2294,10 +2311,53 @@ Util.leftProjectionVectorToRight_ = function(left) {
   return out;
 };
 
+Util.toNonIndexed = function(geometry) {
+
+  if ( geometry.index === null ) {
+
+    console.warn( 'THREE.BufferGeometry.toNonIndexed(): Geometry is already non-indexed.' );
+    return geometry;
+
+  }
+
+  var geometry2 = new THREE.BufferGeometry();
+
+  var indices = geometry.index.array;
+  var attributes = geometry.attributes;
+
+  for ( var name in attributes ) {
+
+    var attribute = attributes[ name ];
+
+    var array = attribute.array;
+    var itemSize = attribute.itemSize;
+
+    var array2 = new array.constructor( indices.length * itemSize );
+
+    var index = 0, index2 = 0;
+
+    for ( var i = 0, l = indices.length; i < l; i ++ ) {
+
+      index = indices[ i ] * itemSize;
+
+      for ( var j = 0; j < itemSize; j ++ ) {
+
+        array2[ index2 ++ ] = array[ index ++ ];
+
+      }
+
+    }
+
+    geometry2.addAttribute( name, new THREE.BufferAttribute( array2, itemSize ) );
+
+  }
+
+  return geometry2;
+};
 
 module.exports = Util;
 
-},{}],14:[function(_dereq_,module,exports){
+},{}],13:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -2488,7 +2548,7 @@ ViewerSelector.prototype.createButton_ = function(label, onclick) {
 
 module.exports = ViewerSelector;
 
-},{"./emitter.js":9,"./util.js":13}],15:[function(_dereq_,module,exports){
+},{"./emitter.js":8,"./util.js":12}],14:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -2564,7 +2624,7 @@ function getWakeLock() {
 
 module.exports = getWakeLock();
 
-},{"./util.js":13}],16:[function(_dereq_,module,exports){
+},{"./util.js":12}],15:[function(_dereq_,module,exports){
 /*
  * Copyright 2015 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -2581,7 +2641,7 @@ module.exports = getWakeLock();
  */
 
 var ButtonManager = _dereq_('./button-manager.js');
-var CardboardDistorter = _dereq_('./cardboard-distorter.js');
+var CardboardDistorter = _dereq_('./cardboard-distorter-mesh.js');
 var DeviceInfo = _dereq_('./device-info.js');
 var Dpdb = _dereq_('./dpdb.js');
 var Emitter = _dereq_('./emitter.js');
@@ -3068,4 +3128,4 @@ WebVRManager.prototype.onDeviceParamsUpdated_ = function(newParams) {
 
 module.exports = WebVRManager;
 
-},{"./button-manager.js":2,"./cardboard-distorter.js":3,"./device-info.js":4,"./dpdb.js":8,"./emitter.js":9,"./modes.js":11,"./rotate-instructions.js":12,"./util.js":13,"./viewer-selector.js":14,"./wakelock.js":15}]},{},[10]);
+},{"./button-manager.js":2,"./cardboard-distorter-mesh.js":3,"./device-info.js":4,"./dpdb.js":7,"./emitter.js":8,"./modes.js":10,"./rotate-instructions.js":11,"./util.js":12,"./viewer-selector.js":13,"./wakelock.js":14}]},{},[9]);

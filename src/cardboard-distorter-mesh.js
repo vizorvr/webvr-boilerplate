@@ -1,4 +1,19 @@
+/*
+ * Copyright 2015 Google Inc. All Rights Reserved.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 var Util = require('./util.js');
+
 
 /**
  * A mesh-based distorter. Based on
@@ -17,20 +32,9 @@ function CardboardDistorter(renderer) {
   // Camera, scene and geometry to render the scene to a texture.
   this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-  var params = {
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.NearestFilter,
-    format: THREE.RGBAFormat
-  };
-  this.renderTarget = new THREE.WebGLRenderTarget(512, 512, params);
+  this.renderTarget = this.createRenderTarget_();
 
-	//this.material = new THREE.MeshBasicMaterial({wireframe: true});
-	this.material = new THREE.MeshBasicMaterial({map: this.renderTarget});
-  //this.material = new THREE.MeshBasicMaterial({map: THREE.ImageUtils.loadTexture('img/UV_Grid_Sm.jpg')});
   this.scene = new THREE.Scene();
-
-  var geometry = this.createWarpMeshGeometry_();
-  this.updateGeometry_(geometry);
 }
 
 
@@ -44,10 +48,12 @@ CardboardDistorter.prototype.patch = function() {
   }.bind(this);
 
   this.renderer.setSize = function(width, height) {
-    this.renderTarget.setSize(width, height);
+    this.renderTarget = this.createRenderTarget_();
+    this.updateGeometry_(this.geometry);
     this.genuineSetSize.call(this.renderer, width, height);
   }.bind(this);
 };
+
 
 CardboardDistorter.prototype.unpatch = function() {
   if (!this.isActive) {
@@ -57,12 +63,14 @@ CardboardDistorter.prototype.unpatch = function() {
   this.renderer.setSize = this.genuineSetSize;
 };
 
+
 CardboardDistorter.prototype.preRender = function() {
   if (!this.isActive) {
     return;
   }
   this.renderer.setRenderTarget(this.renderTarget);
 };
+
 
 CardboardDistorter.prototype.postRender = function() {
   if (!this.isActive) {
@@ -73,6 +81,7 @@ CardboardDistorter.prototype.postRender = function() {
   this.genuineRender.call(this.renderer, this.scene, this.camera);
 };
 
+
 /**
  * Toggles distortion. This is called externally by the boilerplate.
  * It should be enabled only if WebVR is provided by polyfill.
@@ -81,67 +90,31 @@ CardboardDistorter.prototype.setActive = function(state) {
   this.isActive = state;
 };
 
+
+CardboardDistorter.prototype.createRenderTarget_ = function(renderer) {
+  var width  = this.renderer.context.canvas.width;
+  var height = this.renderer.context.canvas.height;
+  var parameters = {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    format: THREE.RGBFormat,
+    stencilBuffer: false
+  };
+
+  return new THREE.WebGLRenderTarget(width, height, parameters);
+}
+
 /**
- * Called whenever the device info changes. At this point we need to
- * re-calculate the distortion mesh.
+ * Called by the manager whenever the device info changes. At this point we need
+ * to re-calculate the distortion mesh and update the geometry.
  */
 CardboardDistorter.prototype.updateDeviceInfo = function(deviceInfo) {
-  var geometry = this.createWarpMeshGeometry2_(deviceInfo);
-  this.updateGeometry_(geometry);
+  this.geometry = this.createWarpMeshGeometry_(deviceInfo);
+  this.updateGeometry_(this.geometry);
 };
 
-/**
- * Creates a warp mesh that is applied to the scene (which is rendered to a
- * texture).
- */
-CardboardDistorter.prototype.createWarpMeshGeometry_ = function() {
-	var distortion = new THREE.Vector2( 0.441, 0.156 );
 
-	//var geometry = new THREE.PlaneBufferGeometry( 1, 1, 10, 20 );
-	// Original line, but it doesn't work:
-  var geometry = new THREE.PlaneBufferGeometry( 1, 1, 20, 40 ).removeAttribute( 'normal' ).toNonIndexed();
-  
-
-	var positions = geometry.attributes.position.array;
-	var uvs = geometry.attributes.uv.array;
-
-	// duplicate
-
-	var positions2 = new Float32Array( positions.length * 2 );
-	positions2.set( positions );
-	positions2.set( positions, positions.length );
-
-	var uvs2 = new Float32Array( uvs.length * 2 );
-	uvs2.set( uvs );
-	uvs2.set( uvs, uvs.length );
-
-	var vector = new THREE.Vector2();
-	var length = positions.length / 3;
-
-	for ( var i = 0, l = positions2.length / 3; i < l; i ++ ) {
-
-		vector.x = positions2[ i * 3 + 0 ];
-		vector.y = positions2[ i * 3 + 1 ];
-
-		var dot = vector.dot( vector );
-		var scalar = 1.5 + ( distortion.x + distortion.y * dot ) * dot;
-
-		var offset = i < length ? 0 : 1;
-
-		positions2[ i * 3 + 0 ] = ( vector.x / scalar ) * 1.5 - 0.5 + offset;
-		positions2[ i * 3 + 1 ] = ( vector.y / scalar ) * 3.0;
-
-		uvs2[ i * 2 ] = ( uvs2[ i * 2 ] + offset ) * 0.5;
-
-	}
-
-	geometry.attributes.position.array = positions2;
-	geometry.attributes.uv.array = uvs2;
-  
-  return geometry;
-};
-
-CardboardDistorter.prototype.createWarpMeshGeometry2_ = function(deviceInfo) {
+CardboardDistorter.prototype.createWarpMeshGeometry_ = function(deviceInfo) {
   var distortedProj = deviceInfo.getProjectionMatrixLeftEye();
   var undistortedProj = deviceInfo.getProjectionMatrixLeftEye(true);
   var viewport = deviceInfo.getUndistortedViewportLeftEye();
@@ -169,7 +142,8 @@ CardboardDistorter.prototype.createWarpMeshGeometry2_ = function(deviceInfo) {
 
   // Calculate the distortion mesh (this is a port of https://goo.gl/LgpmzU).
   //var geometry = new THREE.PlaneBufferGeometry(1, 2, 10, 20);
-  var geometry = new THREE.PlaneBufferGeometry(1, 2, 10, 20).removeAttribute('normal').toNonIndexed();
+  var geometry = new THREE.PlaneBufferGeometry(1, 2, 40, 40);
+  geometry = Util.toNonIndexed(geometry);
   var eyePositions = geometry.attributes.position.array;
   var eyeUvs = geometry.attributes.uv.array;
 
@@ -215,7 +189,11 @@ CardboardDistorter.prototype.createWarpMeshGeometry2_ = function(deviceInfo) {
   return geometry;
 };
 
+
 CardboardDistorter.prototype.updateGeometry_ = function(geometry) {
+	//var material = new THREE.MeshBasicMaterial({wireframe: true});
+  //var material = new THREE.MeshBasicMaterial({map: THREE.ImageUtils.loadTexture('img/UV_Grid_Sm.jpg')});
+  var material = new THREE.MeshBasicMaterial({map: this.renderTarget});
   // Remove all objects from the scene.
   var scene = this.scene;
   scene.traverse(function(child) {
@@ -223,9 +201,10 @@ CardboardDistorter.prototype.updateGeometry_ = function(geometry) {
   });
 
   // Add this mesh to the scene.
-	var mesh = new THREE.Mesh(geometry, this.material);
+	var mesh = new THREE.Mesh(geometry, material);
   this.scene.add(mesh);
 };
+
 
 /**
  * Given a vector in [0, 1], distort it
@@ -234,17 +213,11 @@ CardboardDistorter.prototype.updateGeometry_ = function(geometry) {
  * @param {Boolean} isLeft True iff it's the left eye. False otherwise.
  */
 CardboardDistorter.prototype.distort_ = function(vector, isLeft) {
-  /*
-  var dot = vector.dot( vector );
-  var scalar = 1.0 + ( this.distortion.x + this.distortion.y * dot ) * dot;
-  vector.divideScalar(scalar);
-  return vector;
-  */
-
   var proj = isLeft ? this.projectionLeft : this.projectionRight;
   var unproj = isLeft ? this.unprojectionLeft : this.unprojectionRight;
   return this.barrel_(vector, proj, unproj, this.distortion);
 };
+
 
 /**
  * @param {THREE.Vector2} vec
@@ -267,6 +240,7 @@ CardboardDistorter.prototype.barrel_ = function(vec, projection, unprojection, d
 
   return out;
 };
+
 
 /**
  * @return {Number} Polynomial output of the distorter.

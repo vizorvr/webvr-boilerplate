@@ -14,7 +14,7 @@
  */
 
 var ButtonManager = require('./button-manager.js');
-var CardboardDistorter = require('./cardboard-distorter.js');
+var CardboardDistorter = require('./cardboard-distorter-mesh.js');
 var DeviceInfo = require('./device-info.js');
 var Dpdb = require('./dpdb.js');
 var Emitter = require('./emitter.js');

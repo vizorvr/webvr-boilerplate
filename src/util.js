@@ -100,5 +100,48 @@ Util.leftProjectionVectorToRight_ = function(left) {
   return out;
 };
 
+Util.toNonIndexed = function(geometry) {
+
+  if ( geometry.index === null ) {
+
+    console.warn( 'THREE.BufferGeometry.toNonIndexed(): Geometry is already non-indexed.' );
+    return geometry;
+
+  }
+
+  var geometry2 = new THREE.BufferGeometry();
+
+  var indices = geometry.index.array;
+  var attributes = geometry.attributes;
+
+  for ( var name in attributes ) {
+
+    var attribute = attributes[ name ];
+
+    var array = attribute.array;
+    var itemSize = attribute.itemSize;
+
+    var array2 = new array.constructor( indices.length * itemSize );
+
+    var index = 0, index2 = 0;
+
+    for ( var i = 0, l = indices.length; i < l; i ++ ) {
+
+      index = indices[ i ] * itemSize;
+
+      for ( var j = 0; j < itemSize; j ++ ) {
+
+        array2[ index2 ++ ] = array[ index ++ ];
+
+      }
+
+    }
+
+    geometry2.addAttribute( name, new THREE.BufferAttribute( array2, itemSize ) );
+
+  }
+
+  return geometry2;
+};
 
 module.exports = Util;
