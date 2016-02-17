@@ -74,6 +74,11 @@ CardboardDistorter.prototype.patch = function() {
 
   this.renderer.setSize = function(width, height) {
     this.genuineSetSize.call(this.renderer, width, height);
+     
+    if (textureTarget && textureTarget.width == renderer.context.canvas.width && textureTarget.height == renderer.context.canvas.height) {
+      return
+    }
+	  
     this.textureTarget = createRenderTarget(this.renderer);
   }.bind(this);
 };

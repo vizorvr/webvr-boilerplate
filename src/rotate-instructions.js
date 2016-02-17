@@ -99,6 +99,8 @@ RotateInstructions.prototype.show = function() {
     s.marginLeft = '25%';
     s.marginTop = '25%';
   }
+
+  document.body.dispatchEvent(new CustomEvent('VRManInstructionsShown'))    // vizor.io x Android
 };
 
 RotateInstructions.prototype.hide = function() {
@@ -108,6 +110,8 @@ RotateInstructions.prototype.hide = function() {
 RotateInstructions.prototype.showTemporarily = function(ms) {
   this.show();
   this.timer = setTimeout(this.hide.bind(this), ms);
+
+  document.body.dispatchEvent(new CustomEvent('VRManInstructionsHidden'))   // vizor.io x Android
 };
 
 RotateInstructions.prototype.disableShowTemporarily = function() {
