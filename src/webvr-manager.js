@@ -27,7 +27,7 @@ function WebVRManager(renderer, effect, params) {
   this.mode = Modes.UNKNOWN;
 
   // Set option to hide the button.
-  this.hideButton = this.params.hideButton || false;
+  this.hideButton = Vizor.hideWebVRButton || this.params.hideButton || false;
   // Whether or not the FOV should be distorted or un-distorted. By default, it
   // should be distorted, but in the case of vertex shader based distortion,
   // ensure that we use undistorted parameters.
@@ -150,6 +150,20 @@ WebVRManager.prototype.setMode_ = function(mode) {
   this.emit('modechange', mode, oldMode);
 };
 
+
+WebVRManager.prototype.toggleFullScreen = function() {
+  if (this.isVRCompatible)
+    this.onVRClick_()
+  else
+    this.onFSClick_();
+};
+
+
+WebVRManager.prototype.toggleImmersive = function() {
+  this.onFSClick_()
+};
+
+
 /**
  * Main button was clicked.
  */
@@ -208,6 +222,27 @@ WebVRManager.prototype.onBackClick_ = function() {
   this.exitFullscreen_();
 };
 
+WebVRManager.prototype.getContainerDimensions = function() {	  // gm #896
+	var container, width, height;
+	if (this.renderer.domElement) {
+	  container = this.renderer.domElement.parentNode;
+	  width = container.clientWidth;
+	  height = container.clientHeight
+	  if (!width || !height) {	// fullscreen
+		  width = window.innerWidth;
+		  height = window.innerHeight;
+	  }
+	} else {
+	  container = window;
+	  width = container.innerWidth;
+	  height = container.innerHeight;
+	}
+	return {
+		width: width,
+		height: height
+	}
+}
+
 WebVRManager.prototype.resizeIfNeeded_ = function(camera) {
   // Only resize the canvas if it needs to be resized.
   var size = this.renderer.getSize();
@@ -225,8 +260,7 @@ WebVRManager.prototype.resize_ = function() {
 };
 
 WebVRManager.prototype.requestFullscreen_ = function() {
-  var canvas = document.body;
-  //var canvas = this.renderer.domElement;
+  var canvas = this.renderer.domElement;
   if (canvas.requestFullscreen) {
     canvas.requestFullscreen();
   } else if (canvas.mozRequestFullScreen) {
