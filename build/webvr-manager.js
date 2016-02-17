@@ -2535,9 +2535,6 @@ function WebVRManager(renderer, effect, params) {
   this.deviceInfo.viewer = DeviceInfo.Viewers[this.viewerSelector.selectedKey];
   console.log('Using the %s viewer.', this.getViewer().label);
 
-  this.distorter = new CardboardDistorter(renderer);
-  this.distorter.updateDeviceInfo(this.deviceInfo);
-
   this.isVRCompatible = false;
   this.isFullscreenDisabled = !!Util.getQueryParameter('no_fullscreen');
   this.startMode = Modes.NORMAL;
@@ -2560,17 +2557,8 @@ function WebVRManager(renderer, effect, params) {
   // Check if the browser is compatible with WebVR.
   this.getDeviceByType_(HMDVRDevice).then(function(hmd) {
     // Activate either VR or Immersive mode.
-    if (WebVRConfig.FORCE_DISTORTION) {
-      this.distorter.setActive(true);
+    if (hmd) {
       this.isVRCompatible = true;
-    } else if (hmd) {
-      this.isVRCompatible = true;
-      // Only enable distortion if we are dealing using the polyfill, we have a
-      // perfect device match, and it's not prevented via configuration.
-      if (hmd.deviceName.indexOf('webvr-polyfill') == 0 && this.deviceInfo.getDevice() &&
-          !WebVRConfig.PREVENT_DISTORTION) {
-        this.distorter.setActive(true);
-      }
       this.hmd = hmd;
     }
     // Set the right mode.
@@ -2661,9 +2649,7 @@ WebVRManager.prototype.render = function(scene, camera, timestamp) {
   this.resizeIfNeeded_(camera);
 
   if (this.isVRMode()) {
-    this.distorter.preRender();
     this.effect.render(scene, camera);
-    this.distorter.postRender();
   } else {
     // Scene may be an array of two scenes, one for each eye.
     if (scene instanceof Array) {
@@ -2814,12 +2800,10 @@ WebVRManager.prototype.anyModeToVR_ = function() {
   this.requestFullscreen_();
   //this.effect.setFullScreen(true);
   this.wakelock.request();
-  this.distorter.patch();
 };
 
 WebVRManager.prototype.vrToMagicWindow_ = function() {
   //this.releaseOrientationLock_();
-  this.distorter.unpatch();
 
   // Android bug: when returning from VR, resize the effect.
   this.resize_();
@@ -2831,7 +2815,6 @@ WebVRManager.prototype.anyModeToNormal_ = function() {
   //this.releaseOrientationLock_();
   this.releasePointerLock_();
   this.wakelock.release();
-  this.distorter.unpatch();
 
   // Android bug: when returning from VR, resize the effect.
   this.resize_();
@@ -2958,9 +2941,6 @@ WebVRManager.prototype.exitFullscreen_ = function() {
 WebVRManager.prototype.onViewerChanged_ = function(viewer) {
   this.deviceInfo.setViewer(viewer);
 
-  // Update the distortion appropriately.
-  this.distorter.updateDeviceInfo(this.deviceInfo);
-
   // And update the HMDVRDevice parameters.
   this.setHMDVRDeviceParams_(viewer);
 
@@ -3001,7 +2981,6 @@ WebVRManager.prototype.setHMDVRDeviceParams_ = function(viewer) {
 WebVRManager.prototype.onDeviceParamsUpdated_ = function(newParams) {
   console.log('DPDB reported that device params were updated.');
   this.deviceInfo.updateDeviceParams(newParams);
-  this.distorter.updateDeviceInfo(this.deviceInfo);
 }
 
 module.exports = WebVRManager;
