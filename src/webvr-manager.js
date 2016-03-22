@@ -80,18 +80,12 @@ function WebVRManager(renderer, effect, params) {
       this.onFullscreenChange_.bind(this));
   document.addEventListener('mozfullscreenchange',
       this.onFullscreenChange_.bind(this));
-  document.addEventListener('MSFullscreenChange',
+  document.addEventListener('msfullscreenchange',
       this.onFullscreenChange_.bind(this));
-  window.addEventListener('orientationchange',
-      this.onOrientationChange_.bind(this));
-
-  // Create the necessary elements for wake lock to work.
-  this.wakelock = new Wakelock();
-
-  // Save whether or not we want the touch panner to be enabled or disabled by
-  // default.
-  this.isTouchPannerEnabled = !WebVRConfig.TOUCH_PANNER_DISABLED;
-
+  window.addEventListener('vrdisplaypresentchange',
+      this.onVRDisplayPresentChange_.bind(this));
+  window.addEventListener('vrdisplaydeviceparamschange',
+      this.onVRDisplayDeviceParamsChange_.bind(this));
 }
 
 WebVRManager.prototype = new Emitter();
@@ -267,11 +261,9 @@ WebVRManager.prototype.requestFullscreen_ = function() {
   if (canvas.requestFullscreen) {
     canvas.requestFullscreen();
   } else if (canvas.mozRequestFullScreen) {
-    canvas.mozRequestFullScreen({vrDisplay: this.hmd});
+    canvas.mozRequestFullScreen();
   } else if (canvas.webkitRequestFullscreen) {
-    canvas.webkitRequestFullscreen({vrDisplay: this.hmd});
-  } else if (canvas.msRequestFullscreen) {
-    canvas.msRequestFullscreen({vrDisplay: this.hmd});
+    canvas.webkitRequestFullscreen();
   }
 };
 
@@ -282,8 +274,6 @@ WebVRManager.prototype.exitFullscreen_ = function() {
     document.mozCancelFullScreen();
   } else if (document.webkitExitFullscreen) {
     document.webkitExitFullscreen();
-  } else if (document.msExitFullscreen) {
-    document.msExitFullscreen();
   }
 };
 
