@@ -41,7 +41,7 @@ function WebVRManager(renderer, effect, params) {
 
   // Only enable VR mode if we're on a mobile device.
   // vizor change - always vr compatible because we want to work on vive and oculus
-  this.isVRCompatible = true;//Util.isMobile();
+  this.isVRCompatible = Util.isMobile();
 
   this.isFullscreenDisabled = !!Util.getQueryParameter('no_fullscreen');
   this.startMode = Modes.NORMAL;
@@ -57,6 +57,8 @@ function WebVRManager(renderer, effect, params) {
   // Check if the browser is compatible with WebVR.
   this.getDeviceByType_(VRDisplay).then(function(hmd) {
     this.hmd = hmd;
+
+	this.isVRCompatible = this.isVRCompatible || hmd.capabilities.canPresent
 
     this.emit('initialized');
   }.bind(this));
