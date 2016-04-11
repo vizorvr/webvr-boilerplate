@@ -223,7 +223,6 @@ WebVRManager.prototype.onBackClick_ = function() {
 
 // vizor.io
 WebVRManager.prototype.getContainerDimensions = function() {
-  // vizor.io gm #896
   if (WebVRConfig && WebVRConfig.getContainerMeta) {
      var meta = WebVRConfig.getContainerMeta()
      var ret = {
@@ -232,7 +231,6 @@ WebVRManager.prototype.getContainerDimensions = function() {
      }
     return ret
   }
-  // end vizor.io gm #896
 
 	var container, width, height;
 	if (this.renderer.domElement) {
@@ -255,8 +253,6 @@ WebVRManager.prototype.getContainerDimensions = function() {
 }
 
 
-// vizor.io gm #896
-
 WebVRManager.prototype.resizeIfNeeded_ = function(camera) {
   // Only resize the canvas if it needs to be resized.
   var size = this.renderer.getSize();
@@ -277,7 +273,6 @@ WebVRManager.prototype.resize_ = function(dimensions, camera) {
   }
 };
 
-// end vizor.io gm #896
 
 WebVRManager.prototype.requestFullscreen_ = function() {
   var canvas = this.renderer.domElement;
