@@ -258,7 +258,7 @@ WebVRManager.prototype.resizeIfNeeded_ = function(camera) {
   var size = this.renderer.getSize();
 
   var d = this.getContainerDimensions();
-  if ( size.width != d.width || size.height != d.height) {
+  if ( size.width !== d.width  ||  size.height !== d.height) {
     this.resize_(d, camera);
   }
 };
