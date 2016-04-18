@@ -39,8 +39,12 @@ function WebVRManager(renderer, effect, params) {
   var polyfillWrapper = document.querySelector('.webvr-polyfill-fullscreen-wrapper');
   this.button = new ButtonManager(polyfillWrapper);
 
-  // Only enable VR mode if we're on a mobile device.
-  this.isVRCompatible = Util.isMobile();
+  if (typeof params.isVRCompatible !== 'undefined') {
+    this.isVRCompatible = params.isVRCompatible;
+  } else {
+    // Only automatically enable VR mode if we're on a mobile device.
+    this.isVRCompatible = Util.isMobile();
+  }
 
   this.isFullscreenDisabled = !!Util.getQueryParameter('no_fullscreen');
   this.startMode = Modes.NORMAL;
@@ -188,17 +192,16 @@ WebVRManager.prototype.onVRClick_ = function() {
   this.setMode_(Modes.VR);
 };
 
-WebVRManager.prototype.requestFullscreen_ = function() {
-  var canvas = document.body;
-  //var canvas = this.renderer.domElement;
-  if (canvas.requestFullscreen) {
-    canvas.requestFullscreen();
-  } else if (canvas.mozRequestFullScreen) {
-    canvas.mozRequestFullScreen();
-  } else if (canvas.webkitRequestFullscreen) {
-    canvas.webkitRequestFullscreen();
-  } else if (canvas.msRequestFullscreen) {
-    canvas.msRequestFullscreen();
+WebVRManager.prototype.requestFullscreen_ = function(element) {
+  element = element || document.body;
+  if (element.requestFullscreen) {
+    element.requestFullscreen();
+  } else if (element.mozRequestFullScreen) {
+    element.mozRequestFullScreen();
+  } else if (element.webkitRequestFullscreen) {
+    element.webkitRequestFullscreen();
+  } else if (element.msRequestFullscreen) {
+    element.msRequestFullscreen();
   }
 };
 
